@@ -1,0 +1,156 @@
+---
+title: "卒論１"
+output:
+---S
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+
+---
+データソース
+データを読み込む前に時系列が昇順になるようにデータを編集する（https://www.lifehacker.jp/article/208910excel-quick-tips-flip-cells-switch-rows-columns/）
+終値のデータ型を小数点月の数値型に変換する
+---
+
+```{r}
+library(ismev)
+library(lubridate)
+library(evir)
+library(tea)
+
+## データの読み込み
+data <- read.csv("data/TOPIX 過去データ.csv", header=TRUE, encoding="UTF-8")
+#data <- na.omit(data) # 欠損値を削除
+#data[,2] <- as.numeric(data[,2]) # 数値に変換
+data[,1] <- ymd(data[,1]) # タイムスタンプに変換
+data <- subset(data, (as.Date(日付け) >= as.Date("2012/01/01")) & (as.Date(日付け) < as.Date("2022/01/01"))) # 2012~2021のデータにする
+
+head(data)
+plot(x=ymd(data[,1]),y=data[,"終値"], type="l")
+
+# 対数収益率
+data["log_rt"] <- 0
+data[1:length(data[,2])-1,"log_rt"] <- diff(log(data[,2]))*100
+head(data)
+plot(x=ymd(data[,1]),y=data[,"log_rt"], type="l")
+
+log_rt <- data[,"log_rt"] 
+neg_log_rt = -1 * log_rt
+
+hist(log_rt, breaks=100, prob=TRUE, main="")
+curve(dnorm(x,mean(log_rt),sd(log_rt)),add=TRUE,col="black",lty=2)
+
+use_data <- neg_log_rt
+```
+
+
+```{r}
+# GDPモデルを推定しVaRを算出する関数
+cal_VaR <- function(x) {
+  
+  # 正の値のみから閾値を求める
+  #threshold = dAMSE(x[x>0])$threshold 
+  threshold = qnorm(0.95, mean(x), sd(x)) # 正規分布5%点
+  
+  #　GPDの推定
+  gpdfit <- gpd(data = x,
+                threshold = threshold,
+                method = "ml",
+                ) 
+  
+　# パラメータの抽出
+  xi <- gpdfit$par.ests["xi"]
+  beta <- gpdfit$par.ests["beta"]
+  Nu <- gpdfit$n.exceed
+  n <- length(x)
+  u = threshold
+  
+  # VaRの算出
+  evtVar95 <- u+((beta/xi)*(((n/Nu)*.05)^(-xi) - 1.))
+  evtVat975 <- u+((beta/xi)*(((n/Nu)*.025)^(-xi) - 1.))
+  evtVar99 <- u+((beta/xi)*(((n/Nu)*.01)^(-xi) - 1.))
+  
+  return(cbind(evtVar95, evtVat975, evtVar99, u))
+}
+```
+
+
+```{r}
+# ローリングウィンドウ法
+k <- 1000 # ウィンドウサイズ 
+
+j <- 1
+evt_var95 <- c()
+evt_var975 <- c()
+evt_var99 <- c()
+test <- c()
+
+for (i in (k):(length(use_data)-1)) {
+  start_idx <- i-k+1
+  end_idx <- i
+  test_idx <- i+1
+  train_data <- use_data[start_idx:end_idx]
+  test_data <- use_data[test_idx] 
+  
+  var <- cal_VaR(train_data)
+  
+  evt_var95[j] <- var[1]
+  evt_var975[j] <- var[2]
+  evt_var99[j] <- var[3]
+  test[j] <- test_data
+
+  j <- j+1
+}
+```
+
+```{r}
+evt_var95 <- -evt_var95
+evt_var975 <- -evt_var975
+evt_var99 <- -evt_var99
+test <- -test
+```
+
+
+```{r}
+# vioration率の計算
+evt_viorate95 <- mean(evt_var95 > test)
+evt_viorate975 <- mean(evt_var975 > test)
+evt_viorate99 <- mean(evt_var99 > test)
+
+viorate95 <- c(evt_viorate95)
+viorate975 <- c(evt_viorate975)
+viorate99 <- c(evt_viorate99)
+df <- data.frame(viorate95, viorate975, viorate99)
+colnames(df) <- c("95%violation", "97.5%violation", "99%violation")
+rownames(df) <- c("EVT")
+df
+```
+
+
+```{r}
+ylim <- c(-60,30)
+plot(x=data[(k+1):length(use_data),1], y=evt_var99, col="blue", ylim = ylim, type="l")
+par(new=T)
+plot(x=data[(k+1):length(use_data),1], y=test, ylim = ylim, type="l")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

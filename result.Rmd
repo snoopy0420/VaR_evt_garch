@@ -1,0 +1,257 @@
+---
+title: "R Notebook"
+output:
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+
+```
+
+
+```{r}
+# バイオレーション率
+viorate95 <- c(0.05, nGA_viorate95, tGA_viorate95, gGA_viorate95, evt_viorate95)
+viorate975 <- c(0.025, nGA_viorate975, tGA_viorate975, gGA_viorate975, evt_viorate975)
+viorate99 <- c(0.01, nGA_viorate99, tGA_viorate99, gGA_viorate99, evt_viorate99)
+df <- data.frame(viorate95, viorate975, viorate99)
+colnames(df) <- c("0.95", "0.975", "0.99")
+rownames(df) <- c("期待超過率", "n-GARCH", "t-GARCH", "GJR", "EVT")
+
+df
+write.csv(df, "viorate.csv")
+```
+
+
+```{r}
+## 検定
+
+# Kupiecの尤度比検定（The unconditional coverage test）
+LR_tests_95 <- c()
+LR_tests_95[1] <- VaRTest(alpha = 0.05, test, nGA_var95)$uc.LRp
+LR_tests_95[2] <- VaRTest(alpha = 0.05, test, tGA_var95)$uc.LRp
+LR_tests_95[3] <- VaRTest(alpha = 0.05, test, gGA_var95)$uc.LRp
+LR_tests_95[4] <- VaRTest(alpha = 0.05, test, evt_var95)$uc.LRp
+
+LR_tests_975 <- c()
+LR_tests_975[1] <- VaRTest(alpha = 0.025, test, nGA_var975)$uc.LRp
+LR_tests_975[2] <- VaRTest(alpha = 0.025, test, tGA_var975)$uc.LRp
+LR_tests_975[3] <- VaRTest(alpha = 0.025, test, gGA_var975)$uc.LRp
+LR_tests_975[4] <- VaRTest(alpha = 0.025, test, evt_var975)$uc.LRp
+
+LR_tests_99 <- c()
+LR_tests_99[1] <- VaRTest(alpha = 0.01, test, nGA_var99)$uc.LRp
+LR_tests_99[2] <- VaRTest(alpha = 0.01, test, tGA_var99)$uc.LRp
+LR_tests_99[3] <- VaRTest(alpha = 0.01, test, gGA_var99)$uc.LRp
+LR_tests_99[4] <- VaRTest(alpha = 0.01, test, evt_var99)$uc.LRp
+
+df <- data.frame(LR_tests_95, LR_tests_975, LR_tests_99)
+colnames(df) <- c("0.95", "0.975", "0.99")
+rownames(df) <- c("n-GARCH", "t-GARCH", "GJR", "EVT")
+
+df["mean"] <- apply(df,1,mean)
+df
+write.csv(df, "ucLRp.csv")
+
+
+# 二項検定
+binom_tests_95 <- c()
+binom_tests_95[1] <- binom.test(sum(test<nGA_var95), length(test), p=0.05)$p.value
+binom_tests_95[2] <- binom.test(sum(test<tGA_var95), length(test), p=0.05)$p.value
+binom_tests_95[3] <- binom.test(sum(test<gGA_var95), length(test), p=0.05)$p.value
+binom_tests_95[4] <- binom.test(sum(test<evt_var95), length(test), p=0.05)$p.value
+
+binom_tests_975 <- c()
+binom_tests_975[1] <- binom.test(sum(test<nGA_var975), length(test), p=0.025)$p.value
+binom_tests_975[2] <- binom.test(sum(test<tGA_var975), length(test), p=0.025)$p.value
+binom_tests_975[3] <- binom.test(sum(test<gGA_var975), length(test), p=0.025)$p.value
+binom_tests_975[4] <- binom.test(sum(test<evt_var975), length(test), p=0.025)$p.value
+
+binom_tests_99 <- c()
+binom_tests_99[1] <- binom.test(sum(test<nGA_var99), length(test), p=0.01)$p.value
+binom_tests_99[2] <- binom.test(sum(test<tGA_var99), length(test), p=0.01)$p.value
+binom_tests_99[3] <- binom.test(sum(test<gGA_var99), length(test), p=0.01)$p.value
+binom_tests_99[4] <- binom.test(sum(test<evt_var99), length(test), p=0.01)$p.value
+
+df <- data.frame(binom_tests_95, binom_tests_975, binom_tests_99)
+colnames(df) <- c("0.95", "0.975", "0.99")
+rownames(df) <- c("n-GARCH", "t-GARCH", "GJR", "EVT")
+df
+```
+
+
+```{r}
+# VaRのボラティリティ
+mean99 <- c(mean(nGA_var99), mean(tGA_var99), mean(gGA_var99), mean(evt_var99))
+std99 <- c(sd(nGA_var99), sd(tGA_var99), sd(gGA_var99), sd(evt_var99))
+min99 <- c(min(nGA_var99), min(tGA_var99), min(gGA_var99), min(evt_var99))
+max99 <- c(max(nGA_var99), max(tGA_var99), max(gGA_var99), max(evt_var99))
+df <- data.frame(mean99, std99, min99, max99)
+colnames(df) <- c("mean", "std", "min", "max")
+rownames(df) <- c("n-GARCH", "t-GARCH", "EGARCH", "EVT")
+df
+write.csv(df, "all_VaR_volatility.csv")
+```
+
+```{r}
+# 直近のVaRのボラティリティ
+d <- 365
+nGA_var99_near <- nGA_var99[(length(nGA_var99)-d+1):length(nGA_var99)]
+tGA_var99_near <- tGA_var99[(length(tGA_var99)-d+1):length(tGA_var99)]
+gGA_var99_near <- gGA_var99[(length(gGA_var99)-d+1):length(gGA_var99)]
+evt_var99_near <- evt_var99[(length(evt_var99)-d+1):length(evt_var99)]
+
+mean99 <- c(mean(nGA_var99_near), mean(tGA_var99_near), mean(gGA_var99_near), mean(evt_var99_near))
+std99 <- c(sd(nGA_var99_near), sd(tGA_var99_near), sd(gGA_var99_near), sd(evt_var99_near))
+min99 <- c(min(nGA_var99_near), min(tGA_var99_near), min(gGA_var99_near), min(evt_var99_near))
+max99 <- c(max(nGA_var99_near), max(tGA_var99_near), max(gGA_var99_near), max(evt_var99_near))
+df <- data.frame(mean99, std99, min99, max99)
+colnames(df) <- c("mean", "std", "min", "max")
+rownames(df) <- c("n-GARCH", "t-GARCH", "EGARCH", "EVT")
+
+df
+write.csv(df, "rec_VaR_volatility.csv")
+```
+
+
+```{r}
+# VaR推定値の比較プロット
+ylim <- c(-30,10)
+year = data[(k+1):length(log_rt),1]
+
+plot(x=year, y=test, col="black", ylim=ylim, type="l", xlab="date", ylab="return", main="99%VaR推定値の比較") # return
+#par(new=T)
+#plot(x=year, y=nGA_var99, col="blue", ylim = ylim, type="l") # n-GARCH
+#par(new=T)
+#plot(x=year, y=tGA_var99, col="yellow", ylim=ylim, type="l") # t-GaRCH
+par(new=T)
+plot(x=year, y=gGA_var99, col="green", ylim=ylim, type="l", xlab="", ylab="") # GJR
+par(new=T)
+plot(x=year, y=evt_var99, col="red", ylim = ylim, type="l", xlab="", ylab="") # EVT
+
+legend("bottomright", legend = c("Return","GJR","EVT"), col = c("black","green","red"), lty=1)
+```
+
+```{r}
+# VaR推定値の比較プロット（白黒）
+plot(x=year, y=test, ylim=ylim, type="l", lty = 1, lwd=1,
+     xlab="", ylab="") # return
+par(new=T)
+plot(x=year, y=gGA_var99, ylim=ylim, type="l", lty = 2, xlab="", ylab="") # GJR
+par(new=T)
+plot(x=year, y=evt_var99, ylim = ylim, type="l", lty = 9, xlab="", ylab="") # EVT
+
+legend("bottomright", legend = c("Return","GJR","EVT"), lty=c(1,2,9), lwd=c(1,1,1))
+```
+
+```{r}
+# GJRモデルVaR推定値プロット
+xlim <- c(year[1],year[length(year)])
+
+plot(x=year, y=test, ylim=ylim, type="l", lty = 1, lwd=1,　xlab="", ylab="") # return
+par(new=T)
+plot(x=year, y=gGA_var99, ylim=ylim, type="l", lty = 2, xlab="", ylab="") # GJR
+par(new=T)
+plot(x=year[test < gGA_var99], y=test[test < gGA_var99], xlim=xlim, ylim=ylim, type="p", lty = 1, lwd=2, xlab="", ylab="") # viorate
+
+legend("bottomright", legend = c("Return","GJR","Vioration"), lty=c(1,2,0), lwd=c(1,1,1), pch=c("","","〇"))
+```
+
+
+```{r}
+# EVTVaR推定値プロット
+plot(x=year, y=test, ylim=ylim, type="l", lty = 1, lwd=1,
+     xlab="", ylab="") # return
+par(new=T)
+plot(x=year, y=evt_var99, ylim = ylim, type="l", lty = 3, xlab="", ylab="") # EVT
+par(new=T)
+plot(x=year[test < evt_var99], y=test[test < evt_var99], xlim=xlim, ylim=ylim, type="p", lty = 1, lwd=2, xlab="", ylab="") # viorate
+
+legend("bottomright", legend = c("Return","EVT","Vioration"), lty=c(1,2,0), pch=c("","","〇"))
+```
+
+
+```{r}
+# アンサンブル
+test <- log_rt[1001:length(log_rt)]
+esm_var95 <- (gGA_var95 + evt_var95)/2
+esm_var975 <- (gGA_var975 + evt_var975)/2
+esm_var99 <- (gGA_var99 + evt_var99)/2
+
+esm_viorate95 <- mean(test < esm_var95)
+esm_viorate975 <- mean(test < esm_var975)
+esm_viorate99 <- mean(test < esm_var99)
+
+viorate95 <- c(esm_viorate95)
+viorate975 <- c(esm_viorate975)
+viorate99 <- c(esm_viorate99)
+df <- data.frame(viorate95, viorate975, viorate99)
+colnames(df) <- c("95%violation", "97.5%violation", "99%violation")
+rownames(df) <- c("Ensemble")
+df
+
+write.csv(df, "esm_viorate.csv")
+```
+
+```{r}
+# Kupiecの尤度比検定（The unconditional coverage test）
+LR_tests_95 <- c()
+LR_tests_95[1] <- VaRTest(alpha = 0.05, test, esm_var95)$uc.LRp
+
+LR_tests_975 <- c()
+LR_tests_975[1] <- VaRTest(alpha = 0.025, test, esm_var975)$uc.LRp
+
+LR_tests_99 <- c()
+LR_tests_99[1] <- VaRTest(alpha = 0.01, test, esm_var99)$uc.LRp
+
+df <- data.frame(LR_tests_95, LR_tests_975, LR_tests_99)
+colnames(df) <- c("0.95", "0.975", "0.99")
+rownames(df) <- c("Ensemble")
+
+df["mean"] <- apply(df,1,mean)
+df
+
+write.csv(df, "esm_ucLRp.csv")
+```
+
+
+```{r}
+# 直近のVaRのボラティリティ
+d <- 365
+esm_var99_near <- esm_var99[(length(nGA_var99)-d+1):length(nGA_var99)]
+
+mean99 <- c(mean(esm_var99_near))
+std99 <- c(sd(esm_var99_near))
+min99 <- c(min(esm_var99_near))
+max99 <- c(max(esm_var99_near))
+df <- data.frame(mean99, std99, min99, max99)
+colnames(df) <- c("mean", "std", "min", "max")
+rownames(df) <- c("Ensemble")
+df
+
+write.csv(df, "esm_VaR_volatility.csv")
+```
+
+
+```{r}
+# VaR推定値の比較プロット
+plot(x=year, y=test, ylim=ylim, type="l", lty = 1, lwd=1,
+     xlab="", ylab="") # return
+par(new=T)
+plot(x=year, y=esm_var99, ylim = ylim, type="l", lty = 4, xlab="", ylab="") # ansamble
+par(new=T)
+plot(x=year[test < esm_var99], y=test[test < esm_var99], xlim=xlim, ylim=ylim, type="p", lty = 1, lwd=2, xlab="", ylab="") # vioration
+
+legend("bottomright", legend = c("Return","Ensemble","vioration"), lty=c(1,4,0), pch=c("","","〇"))
+```
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

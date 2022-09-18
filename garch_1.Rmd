@@ -1,0 +1,341 @@
+---
+title: "R Notebook"
+output:
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+---
+データソース
+データを読み込む前に時系列が昇順になるようにデータを編集する（https://www.lifehacker.jp/article/208910excel-quick-tips-flipJASDAQ 過去-cells-switch-rows-columns/）
+終値のデータ型を小数点月の数値型に変換する
+
+---
+
+```{r}
+
+library(lubridate)
+library(fGarch)
+
+## データの読み込み
+data <- read.csv("data/TOPIX 過去データ.csv", header=TRUE, encoding="UTF-8")
+#data <- na.omit(data) # 欠損値を削除
+#data[,2] <- as.numeric(data[,2]) # 数値に変換
+data[,1] <- ymd(data[,1]) # タイムスタンプに変換
+data <- subset(data, (as.Date(日付け) >= as.Date("2012/01/01")) & (as.Date(日付け) < as.Date("2022/01/01"))) # 2012~2021のデータにする
+
+head(data)
+plot(x=ymd(data[,1]),y=data[,"終値"], type="l")
+
+# 対数収益率
+data["log_rt"] <- 0
+data[1:length(data[,2])-1,"log_rt"] <- diff(log(data[,2]))*100 # 対数収益率の計算
+head(data)
+plot(x=ymd(data[,1]),y=data[,"log_rt"], type="l")
+
+log_rt <- data[,"log_rt"] # 対数収益率
+neg_log_rt = -1 * log_rt # 負の対数収益率
+
+hist(log_rt, breaks=100, prob=TRUE, main="収益率（2012年～2021年）")
+curve(dnorm(x,mean(log_rt),sd(log_rt)),add=TRUE,col="red")
+
+use_data <- log_rt
+```
+
+
+```{r}
+## GARCH
+# Garchモデルの定義
+library(rugarch)
+spec.norm <- ugarchspec(variance.model=list(model="sGARCH", # sGarch
+                                            garchOrder=c(1, 1)),
+                        mean.model=list(armaOrder=c(0, 0), include.mean=FALSE), # 平均値のモデルの定義
+                        distribution.model="norm") # 正規分布を仮定
+
+# ローリングウィンドウモデル
+k <- 1000 # ウィンドウサイズ
+garch.norm.roll <- ugarchroll(spec.norm, data = use_data,
+                              window.size = k, 
+                              forecast.length = length(neg_log_rt)-1000,
+                              refit.window = "rolling",
+                              VaR.alpha = c(0.05,0.025,0.01))
+
+# バックテストの結果を表示
+report(garch.norm.roll, VaR.alpha = 0.01)
+
+
+# VaRと収益率をプロット
+#par(mfrow = c(1, 1))
+#plot(garch.norm.roll, which = 4, VaR.alpha = 0.01, ylim=c(-10,30))
+```
+```{r}
+# vioration rate
+actual <- as.data.frame(garch.norm.roll)$Realized
+nGA_var95 <- quantile(garch.norm.roll, probs = 0.05)
+nGA_var975 <- quantile(garch.norm.roll, probs = 0.025)
+nGA_var99 <- quantile(garch.norm.roll, probs = 0.01)
+
+nGA_viorate95 <- mean(actual < nGA_var95)
+nGA_viorate975 <- mean(actual < nGA_var975)
+nGA_viorate99 <- mean(actual < nGA_var99)
+
+print("95, 97.5, 99vioration rate")
+nGA_viorate95
+nGA_viorate975
+nGA_viorate99
+
+# plot VaR 
+
+ylim <- c(-60,30)
+plot(x=data[(k+1):length(use_data),1], y=nGA_var99, col="blue", ylim = ylim, type="l")
+par(new=T)
+plot(x=data[(k+1):length(use_data),1], y=actual, ylim = ylim, type="l")
+```
+
+
+```{r}
+garch.norm <- ugarchfit(data=use_data, spec=spec.norm)
+forc1 = ugarchforecast(garch.norm, n.ahead=1)
+forc1
+quantile(forc1, probs=0.05)
+```
+
+
+```{r}
+# GARCHモデルを推定しVaRを算出する関数
+library(rugarch)
+cal_VaR <- function(x) {
+  
+  spec <- ugarchspec(variance.model=list(model="sGARCH", # GARCH
+                                         garchOrder=c(1, 1)),
+                         mean.model=list(armaOrder=c(0, 0), include.mean=FALSE), # 平均構造のモデルの定義
+                         distribution.model="norm") # 正規分布を仮定
+  
+  # モデルの推定
+  fit <- ugarchfit(data=x, spec=spec)
+  
+  forc1 = ugarchforecast(fit, n.ahead=1)
+  
+  # VaRの算出
+  gaVar95 <- quantile(forc1, probs=0.05)
+  gaVar975 <- quantile(forc1, probs=0.025)
+  gaVar99 <- quantile(forc1, probs=0.01)
+  
+  return(cbind(gaVar95, gaVar975, gaVar99))
+}
+```
+
+```{r}
+# ローリングウィンドウ法によるバックテスト
+k <- 1000 # ウィンドウサイズ 
+
+j <- 1
+nGA_var95 <- c()
+nGA_var975 <- c()
+nGA_var99 <- c()
+test <- c()
+
+for (i in (k):(length(use_data)-1)) {
+  start_idx <- i-k+1
+  end_idx <- i
+  test_idx <- i+1
+  train_data <- use_data[start_idx:end_idx]
+  test_data <- use_data[test_idx] 
+  
+  var <- cal_VaR(train_data)
+  
+  nGA_var95[j] <- var[1]
+  nGA_var975[j] <- var[2]
+  nGA_var99[j] <- var[3]
+  test[j] <- test_data
+
+  j <- j+1
+}
+```
+
+```{r}
+# vioration率の計算
+nGA_viorate95 <- mean(nGA_var95 > test)
+nGA_viorate975 <- mean(nGA_var975 > test)
+nGA_viorate99 <- mean(nGA_var99 > test)
+
+viorate95 <- c(nGA_viorate95)
+viorate975 <- c(nGA_viorate975)
+viorate99 <- c(nGA_viorate99)
+df <- data.frame(viorate95, viorate975, viorate99)
+colnames(df) <- c("95%violation", "97.5%violation", "99%violation")
+rownames(df) <- c("nGARCH")
+df
+
+# VaRと収益率をプロット
+ylim <- c(-60,30)
+plot(x=data[(k+1):length(use_data),1], y=nGA_var99, col="blue", ylim = ylim, type="l")
+par(new=T)
+plot(x=data[(k+1):length(use_data),1], y=-test, ylim = ylim, type="l")
+```
+
+```{r}
+# tGARCHモデルを推定しVaRを算出する関数
+cal_VaR <- function(x) {
+  
+  spec <- ugarchspec(variance.model=list(model="sGARCH", # GARCH
+                                         garchOrder=c(1, 1)),
+                         mean.model=list(armaOrder=c(0, 0), include.mean=FALSE), # 平均構造のモデルの定義
+                         distribution.model="std") # t分布を仮定 fitのshapeが自由度
+  
+  fit <- ugarchfit(data=x, spec=spec)
+  
+  forc1 = ugarchforecast(fit, n.ahead=1)
+  # VaRの算出
+  gaVar95 <- quantile(forc1, probs=0.05)
+  gaVar975 <- quantile(forc1, probs=0.025)
+  gaVar99 <- quantile(forc1, probs=0.01)
+  
+  return(cbind(gaVar95, gaVar975, gaVar99))
+}
+```
+
+```{r}
+# ローリングウィンドウ法
+k <- 1000 # ウィンドウサイズ 
+
+j <- 1
+tGA_var95 <- c()
+tGA_var975 <- c()
+tGA_var99 <- c()
+test <- c()
+
+for (i in (k):(length(use_data)-1)) {
+  start_idx <- i-k+1
+  end_idx <- i
+  test_idx <- i+1
+  train_data <- use_data[start_idx:end_idx]
+  test_data <- use_data[test_idx] 
+  
+  var <- cal_VaR(train_data)
+  
+  tGA_var95[j] <- var[1]
+  tGA_var975[j] <- var[2]
+  tGA_var99[j] <- var[3]
+  test[j] <- test_data
+
+  j <- j+1
+}
+```
+
+```{r}
+tGA_viorate95
+```
+
+```{r}
+# vioration率の計算
+tGA_viorate95 <- mean(tGA_var95 > test)
+tGA_viorate975 <- mean(tGA_var975 > test)
+tGA_viorate99 <- mean(tGA_var99 > test)
+
+viorate95 <- c(tGA_viorate95)
+viorate975 <- c(tGA_viorate975)
+viorate99 <- c(tGA_viorate99)
+df <- data.frame(viorate95, viorate975, viorate99)
+colnames(df) <- c("95%violation", "97.5%violation", "99%violation")
+rownames(df) <- c("tGARCH")
+df
+
+# VaRと収益率をプロット
+ylim <- c(-60,30)
+plot(x=data[(k+1):length(use_data),1], y=tGA_var99, col="blue", ylim = ylim, type="l")
+par(new=T)
+plot(x=data[(k+1):length(use_data),1], y=test, ylim = ylim, type="l")
+```
+
+
+
+
+```{r}
+# GJRモデルを推定しVaRを算出する関数
+cal_VaR <- function(x) {
+  
+  spec <- ugarchspec(variance.model=list(model="gjrGARCH", # GJR
+                                         garchOrder=c(1, 1)),
+                         mean.model=list(armaOrder=c(0, 0), include.mean=FALSE), # 平均構造のモデルの定義
+                         distribution.model="std") # t分布を仮定
+  
+  fit <- ugarchfit(data=x, spec=spec)
+  
+  forc1 = ugarchforecast(fit, n.ahead=1)
+  # VaRの算出
+  gaVar95 <- quantile(forc1, probs=0.05)
+  gaVar975 <- quantile(forc1, probs=0.025)
+  gaVar99 <- quantile(forc1, probs=0.01)
+  
+  return(cbind(gaVar95, gaVar975, gaVar99))
+}
+```
+
+```{r}
+# ローリングウィンドウ法
+k <- 1000 # ウィンドウサイズ 
+
+j <- 1
+gGA_var95 <- c()
+gGA_var975 <- c()
+gGA_var99 <- c()
+test <- c()
+
+for (i in (k):(length(use_data)-1)) {
+  start_idx <- i-k+1
+  end_idx <- i
+  test_idx <- i+1
+  train_data <- use_data[start_idx:end_idx]
+  test_data <- use_data[test_idx] 
+  
+  var <- cal_VaR(train_data)
+  
+  gGA_var95[j] <- var[1]
+  gGA_var975[j] <- var[2]
+  gGA_var99[j] <- var[3]
+  test[j] <- test_data
+
+  j <- j+1
+}
+```
+
+```{r}
+# vioration率の計算
+gGA_viorate95 <- mean(gGA_var95 > test)
+gGA_viorate975 <- mean(gGA_var975 > test)
+gGA_viorate99 <- mean(gGA_var99 > test)
+
+viorate95 <- c(gGA_viorate95)
+viorate975 <- c(gGA_viorate975)
+viorate99 <- c(gGA_viorate99)
+df <- data.frame(viorate95, viorate975, viorate99)
+colnames(df) <- c("95%violation", "97.5%violation", "99%violation")
+rownames(df) <- c("GJR")
+df
+
+# VaRと収益率をプロット
+ylim <- c(-60,30)
+plot(x=data[(k+1):length(use_data),1], y=gGA_var99, col="blue", ylim = ylim, type="l")
+par(new=T)
+plot(x=data[(k+1):length(use_data),1], y=test, ylim = ylim, type="l")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

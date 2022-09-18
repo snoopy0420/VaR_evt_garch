@@ -1,0 +1,6 @@
+data/*
+!data/.gitkeep
+*.RData
+*.Rhistory
+dAME_code.R
+*.md
